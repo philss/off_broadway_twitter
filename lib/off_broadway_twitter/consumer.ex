@@ -11,7 +11,7 @@ defmodule OffBroadwayTwitter.Consumer do
         concurrency: 1
       ],
       processors: [
-        default: [concurrency: 50]
+        default: [concurrency: 3]
       ],
       batchers: [
         default: [batch_size: 20, batch_timeout: 2000]
