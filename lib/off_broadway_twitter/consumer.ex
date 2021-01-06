@@ -29,8 +29,8 @@ defmodule OffBroadwayTwitter.Consumer do
 
   @impl true
   def handle_batch(_, messages, _, _) do
-    #list = messages |> Enum.map(fn e -> e.data end)
-    #IO.inspect(list, label: "Got batch")
+    list = messages |> Enum.map(fn e -> e.data end)
+    IO.inspect(list, label: "Got batch")
     messages
   end
 end

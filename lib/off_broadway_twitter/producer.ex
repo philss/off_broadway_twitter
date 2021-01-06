@@ -26,6 +26,7 @@ defmodule OffBroadwayTwitter.Producer do
        size: 0,
        request_ref: nil,
        last_message: nil,
+       conn: nil,
        token: token,
        uri: uri
      }}
@@ -47,20 +48,26 @@ defmodule OffBroadwayTwitter.Producer do
 
     IO.puts("requested => #{now()}")
 
-    Process.send_after(self(), {:process_stream, conn}, 2000)
+    #send(self(), {:process_stream, conn})
 
     IO.puts("started => #{now()}")
 
-    {:noreply, [], %{state | request_ref: request_ref}}
+    {:noreply, [], %{state | request_ref: request_ref, conn: conn}}
+  end
+
+  @impl true
+  def handle_info({:process_stream, conn}, %{last_message: nil} = state) do
+    IO.puts("nil last message, #{now()}")
+    send(self(), {:process_stream, conn})
+
+    {:noreply, [], state}
   end
 
   @impl true
   def handle_info({:process_stream, conn}, state) do
     case HTTP2.stream(conn, state.last_message) do
       {:ok, conn, resp} ->
-        send(self(), {:process_stream, conn})
-
-        process_responses(resp, state)
+        process_responses(resp, %{state | conn: conn})
 
       {:error, conn, %Mint.HTTPError{reason: {:server_closed_connection, :refused_stream, _}}, _} ->
         IO.puts("disconnecting => #{now()}")
@@ -68,14 +75,14 @@ defmodule OffBroadwayTwitter.Producer do
         IO.puts("starting again => #{now()}")
         Process.send_after(self(), :start_stream, 100)
 
-        {:noreply, [], state}
+        {:noreply, [], %{state | conn: conn}}
 
       {:error, _conn, %{reason: reason}, _} when reason in [:closed, :einval] ->
         IO.puts("ERROR unknown => #{reason}, #{now()}")
         IO.puts("starting again => #{now()}")
         Process.send_after(self(), :start_stream, 2_000)
 
-        {:noreply, [], state}
+        {:noreply, [], %{state | conn: conn}}
 
       {:error, other} ->
         IO.inspect(other, label: "stopping stream => #{now()}")
@@ -90,6 +97,10 @@ defmodule OffBroadwayTwitter.Producer do
 
   @impl true
   def handle_info({tag, _socket, _data} = message, state) when tag in [:tcp, :ssl] do
+    if state.conn do
+      send(self(), {:process_stream, state.conn})
+    end
+
     {:noreply, [], %{state | last_message: message}}
   end
 
