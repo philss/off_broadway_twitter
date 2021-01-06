@@ -11,94 +11,152 @@ defmodule OffBroadwayTwitter.Producer do
 
   @impl true
   def init(opts) do
-    {:ok, conn, uri} = connect(opts)
-
     tweets_queue = :queue.new()
 
+    uri = URI.parse(@twitter_stream_url_v2)
     token = Keyword.fetch!(opts, :twitter_bearer_token)
-    Process.send_after(self(), {:first_request, token: token, conn: conn}, 2_000)
 
-    {:producer, %{demand: 0, queue: tweets_queue, size: 0, uri: uri, last_message: nil}}
+    IO.puts("init => #{now()}")
+    Process.send_after(self(), :start_stream, 2_000)
+
+    {:producer,
+     %{
+       demand: 0,
+       queue: tweets_queue,
+       size: 0,
+       request_ref: nil,
+       last_message: nil,
+       token: token,
+       uri: uri
+     }}
   end
 
   @impl true
-  def handle_info({:first_request, opts}, state) do
-    token = Keyword.fetch!(opts, :token)
-    conn = Keyword.fetch!(opts, :conn)
-    IO.puts("SECOND")
+  def handle_info(:start_stream, state) do
+    {:ok, conn} = HTTP2.connect(:https, state.uri.host, state.uri.port)
+    IO.puts("connected => #{now()}")
 
-    {:ok, conn, _request_ref} =
+    {:ok, conn, request_ref} =
       HTTP2.request(
         conn,
         "GET",
         state.uri.path,
-        [{"Authorization", "Bearer #{token}"}],
-        :stream
+        [{"Authorization", "Bearer #{state.token}"}],
+        nil
       )
 
-    send(self(), {:process_stream, conn})
+    IO.puts("requested => #{now()}")
 
-    {:noreply, [], state}
+    Process.send_after(self(), {:process_stream, conn}, 2000)
+
+    IO.puts("started => #{now()}")
+
+    {:noreply, [], %{state | request_ref: request_ref}}
   end
 
   @impl true
   def handle_info({:process_stream, conn}, state) do
-    IO.puts("THIRD -> multiple")
     case HTTP2.stream(conn, state.last_message) do
-      {:ok, %HTTP2{} = conn, resp} ->
+      {:ok, conn, resp} ->
         send(self(), {:process_stream, conn})
+
+        process_responses(resp, state)
+
+      {:error, conn, %Mint.HTTPError{reason: {:server_closed_connection, :refused_stream, _}}, _} ->
+        IO.puts("disconnecting => #{now()}")
+        Mint.HTTP.close(conn)
+        IO.puts("starting again => #{now()}")
+        Process.send_after(self(), :start_stream, 100)
+
         {:noreply, [], state}
 
-      other ->
-        IO.inspect(other, label: "stopping stream")
+      {:error, _conn, %{reason: reason}, _} when reason in [:closed, :einval] ->
+        IO.puts("ERROR unknown => #{reason}, #{now()}")
+        IO.puts("starting again => #{now()}")
+        Process.send_after(self(), :start_stream, 2_000)
+
+        {:noreply, [], state}
+
+      {:error, other} ->
+        IO.inspect(other, label: "stopping stream => #{now()}")
+
         {:stop, :stream_stopped, state}
+
+      message ->
+        IO.inspect(message, label: "unknown stream result => #{now()}")
+        {:noreply, [], state}
     end
   end
 
   @impl true
   def handle_info({tag, _socket, _data} = message, state) when tag in [:tcp, :ssl] do
-    IO.puts("FORTH")
-    IO.inspect(message, label: "AAAAAA: last message")
     {:noreply, [], %{state | last_message: message}}
   end
 
   @impl true
-  def handle_info({:data, tweet}, state) do
-    case Jason.decode(tweet) do
-      {:ok, decoded} ->
-        data = Map.fetch!(decoded, "data")
-        meta = Map.delete(data, "text")
-        text = Map.fetch!(data, "text")
+  def handle_info({tag, _socket} = message, state) when tag in [:tcp_closed, :ssl_closed] do
+    IO.puts("closed SSL/TCP => #{now()}")
 
-        message = %Message{
-          data: text,
-          metadata: meta,
-          acknowledger: {Broadway.NoopAcknowledger, nil, nil}
-        }
-
-        handle_received_messages(%{
-          state
-          | queue: :queue.in(message, state.queue),
-            size: state.size + 1
-        })
-
-      {:error, _} ->
-        IO.puts("error decoding")
-        handle_received_messages(state)
-    end
+    {:noreply, [], %{state | last_message: message}}
   end
 
   @impl true
   def handle_info(message, state) do
-    IO.inspect(message, label: "BBBBBBBBBBBBBBBBB unknown")
+    IO.inspect(message, label: "unknown")
+
+    IO.puts("sending reconnecting => #{now()}")
+    Process.send_after(self(), :start_stream, 1_000)
 
     {:noreply, [], state}
   end
 
+  defp now do
+    DateTime.utc_now()
+  end
+
+  defp process_responses(responses, state) do
+    state =
+      Enum.reduce(responses, state, fn response, state ->
+        case response do
+          {:data, _ref, tweet} ->
+            case Jason.decode(tweet) do
+              {:ok, decoded} ->
+                data = Map.fetch!(decoded, "data")
+                meta = Map.delete(data, "text")
+                text = Map.fetch!(data, "text")
+
+                message = %Message{
+                  data: text,
+                  metadata: meta,
+                  acknowledger: {Broadway.NoopAcknowledger, nil, nil}
+                }
+
+                %{state | queue: :queue.in(message, state.queue), size: state.size + 1}
+
+              {:error, _} ->
+                IO.puts("error decoding")
+
+                state
+            end
+
+          {:done, _ref} ->
+            IO.puts("reconnecting after done, #{now()}")
+            # Process.send_after(self(), :start_stream, 1_000)
+            state
+
+          {_, _ref, other} ->
+            IO.inspect(other, label: "other things")
+            state
+        end
+      end)
+
+    handle_received_messages(state)
+  end
+
   @impl true
   def handle_demand(demand, state) do
-    IO.inspect(state.size, label: "size")
-    IO.inspect(state.demand + demand, label: "demand")
+    #IO.inspect(state.size, label: "size")
+    #IO.inspect(state.demand + demand, label: "demand")
 
     handle_received_messages(%{state | demand: state.demand + demand})
   end
@@ -108,7 +166,7 @@ defmodule OffBroadwayTwitter.Producer do
       if state.size >= state.demand do
         state.demand
       else
-        0
+        state.size
       end
 
     {tweets, new_queue} = get_tweets(state.queue, amount_to_fetch, [])
@@ -128,15 +186,5 @@ defmodule OffBroadwayTwitter.Producer do
     {{:value, tweet}, queue} = :queue.out(tweets_queue)
 
     get_tweets(queue, demand - 1, [tweet | tweets])
-  end
-
-  defp connect(opts) do
-    uri = URI.parse(@twitter_stream_url_v2)
-
-    {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, uri.host, uri.port)
-
-    IO.puts("FIRST")
-
-    {:ok, conn, uri}
   end
 end

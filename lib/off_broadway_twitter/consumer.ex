@@ -11,7 +11,7 @@ defmodule OffBroadwayTwitter.Consumer do
         concurrency: 1
       ],
       processors: [
-        default: [concurrency: 3]
+        default: [concurrency: 50]
       ],
       batchers: [
         default: [batch_size: 20, batch_timeout: 2000]
@@ -29,8 +29,8 @@ defmodule OffBroadwayTwitter.Consumer do
 
   @impl true
   def handle_batch(_, messages, _, _) do
-    list = messages |> Enum.map(fn e -> e.data end)
-    IO.inspect(list, label: "Got batch")
+    #list = messages |> Enum.map(fn e -> e.data end)
+    #IO.inspect(list, label: "Got batch")
     messages
   end
 end
