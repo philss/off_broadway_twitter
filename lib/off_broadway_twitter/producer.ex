@@ -13,8 +13,6 @@ defmodule OffBroadwayTwitter.Producer do
 
   @impl true
   def init(opts) do
-    tweets_queue = :queue.new()
-
     uri = URI.parse(@twitter_stream_url_v2)
     token = Keyword.fetch!(opts, :twitter_bearer_token)
 
@@ -23,8 +21,7 @@ defmodule OffBroadwayTwitter.Producer do
     {:producer,
      %{
        demand: 0,
-       queue: tweets_queue,
-       size: 0,
+       tweets: [],
        request_ref: nil,
        last_message: nil,
        conn: nil,
@@ -61,7 +58,7 @@ defmodule OffBroadwayTwitter.Producer do
   end
 
   @impl true
-  def handle_info({:process_stream, conn}, state) do
+  def handle_info({:process_stream, %HTTP2{} = conn}, state) do
     case HTTP2.stream(conn, state.last_message) do
       {:ok, conn, resp} ->
         process_responses(resp, %{state | conn: conn})
@@ -87,9 +84,7 @@ defmodule OffBroadwayTwitter.Producer do
 
   @impl true
   def handle_info({tag, _socket, _data} = message, state) when tag in [:tcp, :ssl] do
-    if state.conn do
-      send(self(), {:process_stream, state.conn})
-    end
+    send(self(), {:process_stream, state.conn})
 
     {:noreply, [], %{state | last_message: message}}
   end
@@ -118,7 +113,7 @@ defmodule OffBroadwayTwitter.Producer do
                 acknowledger: {Broadway.NoopAcknowledger, nil, nil}
               }
 
-              %{state | queue: :queue.in(message, state.queue), size: state.size + 1}
+              %{state | tweets: [message | state.tweets]}
 
             {:error, _} ->
               IO.puts("error decoding")
@@ -141,30 +136,15 @@ defmodule OffBroadwayTwitter.Producer do
     handle_received_messages(%{state | demand: state.demand + demand})
   end
 
+  # We are are dispatching events as they arrive.
+  # If there is no Consumer or demand is low, then GenStage
+  # will buffer the messages internally.
+  # We could have an internal control, but is not necessary
+  # for this example.
   defp handle_received_messages(state) do
-    amount_to_fetch =
-      if state.size >= state.demand do
-        state.demand
-      else
-        state.size
-      end
+    len = length(state.tweets)
 
-    {tweets, new_queue} = get_tweets(state.queue, amount_to_fetch, [])
-
-    {:noreply, tweets,
-     %{
-       state
-       | queue: new_queue,
-         size: state.size - amount_to_fetch,
-         demand: state.demand - amount_to_fetch
-     }}
-  end
-
-  defp get_tweets(tweets_queue, 0, tweets), do: {Enum.reverse(tweets), tweets_queue}
-
-  defp get_tweets(tweets_queue, demand, tweets) do
-    {{:value, tweet}, queue} = :queue.out(tweets_queue)
-
-    get_tweets(queue, demand - 1, [tweet | tweets])
+    {:noreply, Enum.reverse(state.tweets),
+     %{state | tweets: [], demand: Enum.max([0, state.demand - len])}}
   end
 end
