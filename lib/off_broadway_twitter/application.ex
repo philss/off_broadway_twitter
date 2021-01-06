@@ -8,13 +8,6 @@ defmodule OffBroadwayTwitter.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Starts a worker by calling: OffBroadwayTwitter.Worker.start_link(arg)
-      # {OffBroadwayTwitter.Worker, arg}
-      {Finch,
-       name: OffBroadwayTwitter.TwitterFinch,
-       pools: %{
-         default: [size: 1]
-       }},
       {OffBroadwayTwitter.Consumer,
        twitter_bearer_token: System.fetch_env!("TWITTER_BEARER_TOKEN")}
     ]
