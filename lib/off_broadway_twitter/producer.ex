@@ -8,6 +8,8 @@ defmodule OffBroadwayTwitter.Producer do
 
   @behaviour Producer
   @twitter_stream_url_v2 "https://api.twitter.com/2/tweets/sample/stream"
+  @connect_in_ms 2_000
+  @reconnect_in_ms 1_000
 
   @impl true
   def init(opts) do
@@ -16,7 +18,7 @@ defmodule OffBroadwayTwitter.Producer do
     uri = URI.parse(@twitter_stream_url_v2)
     token = Keyword.fetch!(opts, :twitter_bearer_token)
 
-    Process.send_after(self(), :start_stream, 2_000)
+    Process.send_after(self(), :start_stream, @connect_in_ms)
 
     {:producer,
      %{
@@ -54,21 +56,21 @@ defmodule OffBroadwayTwitter.Producer do
         process_responses(resp, %{state | conn: conn})
 
       {:error, conn, %Mint.HTTPError{reason: {:server_closed_connection, :refused_stream, _}}, _} ->
+        # Do we need to close on our side?
         Mint.HTTP.close(conn)
-        Process.send_after(self(), :start_stream, 100)
+
+        Process.send_after(self(), :start_stream, @reconnect_in_ms)
 
         {:noreply, [], %{state | conn: conn}}
 
-      {:error, _conn, %{reason: reason}, _} when reason in [:closed, :einval] ->
-        Process.send_after(self(), :start_stream, 2_000)
+      {:error, conn, %{reason: reason}, _} when reason in [:closed, :einval] ->
+        # I got :einval once, but I suppose I was doing something wrong
+        Process.send_after(self(), :start_stream, @connect_in_ms)
 
         {:noreply, [], %{state | conn: conn}}
 
       {:error, other} ->
         {:stop, :stream_stopped, state}
-
-      message ->
-        {:noreply, [], state}
     end
   end
 
@@ -86,47 +88,41 @@ defmodule OffBroadwayTwitter.Producer do
     {:noreply, [], %{state | last_message: message}}
   end
 
-  @impl true
-  def handle_info(message, state) do
-    Process.send_after(self(), :start_stream, 1_000)
-
-    {:noreply, [], state}
-  end
-
   defp process_responses(responses, state) do
-    state =
-      Enum.reduce(responses, state, fn response, state ->
-        case response do
-          {:data, _ref, tweet} ->
-            case Jason.decode(tweet) do
-              {:ok, decoded} ->
-                data = Map.fetch!(decoded, "data")
-                meta = Map.delete(data, "text")
-                text = Map.fetch!(data, "text")
+    responses
+    |> Enum.reduce(state, fn response, state ->
+      ref = state.request_ref
 
-                message = %Message{
-                  data: text,
-                  metadata: meta,
-                  acknowledger: {Broadway.NoopAcknowledger, nil, nil}
-                }
+      case response do
+        {:data, ^ref, tweet} ->
+          case Jason.decode(tweet) do
+            {:ok, decoded} ->
+              data = Map.fetch!(decoded, "data")
+              meta = Map.delete(data, "text")
+              text = Map.fetch!(data, "text")
 
-                %{state | queue: :queue.in(message, state.queue), size: state.size + 1}
+              message = %Message{
+                data: text,
+                metadata: meta,
+                acknowledger: {Broadway.NoopAcknowledger, nil, nil}
+              }
 
-              {:error, _} ->
-                IO.puts("error decoding")
+              %{state | queue: :queue.in(message, state.queue), size: state.size + 1}
 
-                state
-            end
+            {:error, _} ->
+              IO.puts("error decoding")
 
-          {:done, _ref} ->
-            state
+              state
+          end
 
-          {_, _ref, _other} ->
-            state
-        end
-      end)
+        {:done, ^ref} ->
+          state
 
-    handle_received_messages(state)
+        {_, _ref, _other} ->
+          state
+      end
+    end)
+    |> handle_received_messages()
   end
 
   @impl true
