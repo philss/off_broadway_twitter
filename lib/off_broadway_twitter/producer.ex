@@ -67,14 +67,8 @@ defmodule OffBroadwayTwitter.Producer do
       {:ok, conn, resp} ->
         process_responses(resp, %{state | conn: conn})
 
-      {:error, conn, %Mint.HTTPError{reason: {:server_closed_connection, :refused_stream, _}}, _} ->
+      {:error, conn, %error{}, _} when error in [Mint.HTTPError, Mint.TransportError] ->
         timer = schedule_connection(@reconnect_in_ms)
-
-        {:noreply, [], %{state | conn: conn, connection_timer: timer}}
-
-      {:error, conn, %{reason: reason}, _} when reason in [:closed, :einval] ->
-        # I got :einval once, but I suppose I was doing something wrong
-        timer = schedule_connection(@connect_in_ms)
 
         {:noreply, [], %{state | conn: conn, connection_timer: timer}}
 
