@@ -58,15 +58,14 @@ defmodule OffBroadwayTwitter.Producer do
   end
 
   @impl true
-  def handle_info({:process_stream, %HTTP2{} = conn}, state) do
-    case HTTP2.stream(conn, state.last_message) do
+  def handle_info({tag, _socket, _data} = message, state) when tag in [:tcp, :ssl] do
+    conn = state.conn
+
+    case HTTP2.stream(conn, message) do
       {:ok, conn, resp} ->
         process_responses(resp, %{state | conn: conn})
 
       {:error, conn, %Mint.HTTPError{reason: {:server_closed_connection, :refused_stream, _}}, _} ->
-        # Do we need to close on our side?
-        HTTP2.close(conn)
-
         timer = schedule_connection(@reconnect_in_ms)
 
         {:noreply, [], %{state | conn: conn, connection_timer: timer}}
@@ -80,13 +79,6 @@ defmodule OffBroadwayTwitter.Producer do
       {:error, _other} ->
         {:stop, :stream_stopped_due_unknown_error, state}
     end
-  end
-
-  @impl true
-  def handle_info({tag, _socket, _data} = message, state) when tag in [:tcp, :ssl] do
-    send(self(), {:process_stream, state.conn})
-
-    {:noreply, [], %{state | last_message: message}}
   end
 
   @impl true
