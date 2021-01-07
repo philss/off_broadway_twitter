@@ -16,19 +16,34 @@ defmodule OffBroadwayTwitter.Producer do
     uri = URI.parse(@twitter_stream_url_v2)
     token = Keyword.fetch!(opts, :twitter_bearer_token)
 
-    timer = schedule_connection(@connect_in_ms)
+    state =
+      connect_to_stream(%{
+        demand: 0,
+        tweets: [],
+        request_ref: nil,
+        last_message: nil,
+        conn: nil,
+        token: token,
+        connection_timer: nil,
+        uri: uri
+      })
 
-    {:producer,
-     %{
-       demand: 0,
-       tweets: [],
-       request_ref: nil,
-       last_message: nil,
-       conn: nil,
-       token: token,
-       connection_timer: timer,
-       uri: uri
-     }}
+    {:producer, state}
+  end
+
+  defp connect_to_stream(state) do
+    {:ok, conn} = HTTP2.connect(:https, state.uri.host, state.uri.port)
+
+    {:ok, conn, request_ref} =
+      HTTP2.request(
+        conn,
+        "GET",
+        state.uri.path,
+        [{"Authorization", "Bearer #{state.token}"}],
+        nil
+      )
+
+    %{state | request_ref: request_ref, conn: conn, connection_timer: nil}
   end
 
   defp schedule_connection(interval) do
@@ -43,18 +58,7 @@ defmodule OffBroadwayTwitter.Producer do
 
   @impl true
   def handle_info(:connect_to_stream, state) do
-    {:ok, conn} = HTTP2.connect(:https, state.uri.host, state.uri.port)
-
-    {:ok, conn, request_ref} =
-      HTTP2.request(
-        conn,
-        "GET",
-        state.uri.path,
-        [{"Authorization", "Bearer #{state.token}"}],
-        nil
-      )
-
-    {:noreply, [], %{state | request_ref: request_ref, conn: conn, connection_timer: nil}}
+    {:noreply, [], connect_to_stream(state)}
   end
 
   @impl true
