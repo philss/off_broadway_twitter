@@ -8,7 +8,6 @@ defmodule OffBroadwayTwitter.Producer do
 
   @behaviour Producer
   @twitter_stream_url_v2 "https://api.twitter.com/2/tweets/sample/stream"
-  @connect_in_ms 2_000
   @reconnect_in_ms 1_000
 
   @impl true
@@ -18,7 +17,6 @@ defmodule OffBroadwayTwitter.Producer do
 
     state =
       connect_to_stream(%{
-        demand: 0,
         tweets: [],
         request_ref: nil,
         last_message: nil,
@@ -128,19 +126,19 @@ defmodule OffBroadwayTwitter.Producer do
   end
 
   @impl true
-  def handle_demand(demand, state) do
-    handle_received_messages(%{state | demand: state.demand + demand})
+  def handle_demand(_demand, state) do
+    handle_received_messages(state)
   end
 
   # We are are dispatching events as they arrive.
   # If there is no Consumer or demand is low, then GenStage
   # will buffer the messages internally.
-  # We could have an internal control, but is not necessary
-  # for this example.
+  #
+  # For this scenario it's not necessary to have
+  # an internal control, since Twitter is a firehouse
+  # of events without back-pressure. We only ignore
+  # the Tweets that doesn't fit the buffer.
   defp handle_received_messages(state) do
-    len = length(state.tweets)
-
-    {:noreply, Enum.reverse(state.tweets),
-     %{state | tweets: [], demand: Enum.max([0, state.demand - len])}}
+    {:noreply, Enum.reverse(state.tweets), %{state | tweets: []}}
   end
 end
