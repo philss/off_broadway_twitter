@@ -8,13 +8,14 @@ defmodule OffBroadwayTwitter.Consumer do
       name: __MODULE__,
       producer: [
         module: {OffBroadwayTwitter.Producer, opts},
+        # We cannot have more than one producer with the same token.
         concurrency: 1
       ],
       processors: [
-        default: [concurrency: 50]
+        default: [concurrency: 5]
       ],
       batchers: [
-        default: [batch_size: 20, batch_timeout: 2000]
+        default: [batch_size: 10, batch_timeout: 2000]
       ]
     )
   end
@@ -31,6 +32,7 @@ defmodule OffBroadwayTwitter.Consumer do
   def handle_batch(_, messages, _, _) do
     list = messages |> Enum.map(fn e -> e.data end)
     IO.inspect(list, label: "Got batch")
+
     messages
   end
 end

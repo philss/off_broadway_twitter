@@ -23,7 +23,8 @@ defmodule OffBroadwayTwitter.MixProject do
   defp deps do
     [
       {:broadway, "~> 0.6.2"},
-      {:finch, "~> 0.6"},
+      {:castore, "~> 0.1.0"},
+      {:mint, "~> 1.0"},
       {:jason, "~> 1.2"}
     ]
   end
