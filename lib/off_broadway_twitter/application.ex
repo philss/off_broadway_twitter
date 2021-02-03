@@ -8,8 +8,7 @@ defmodule OffBroadwayTwitter.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {OffBroadwayTwitter.Consumer,
-       twitter_bearer_token: System.fetch_env!("TWITTER_BEARER_TOKEN")}
+      {OffBroadwayTwitter, twitter_bearer_token: System.fetch_env!("TWITTER_BEARER_TOKEN")}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

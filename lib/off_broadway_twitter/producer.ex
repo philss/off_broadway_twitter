@@ -90,8 +90,7 @@ defmodule OffBroadwayTwitter.Producer do
       case response do
         {:data, ^ref, tweet} ->
           case Jason.decode(tweet) do
-            {:ok, decoded} ->
-              data = Map.fetch!(decoded, "data")
+            {:ok, %{"data" => data}} ->
               meta = Map.delete(data, "text")
               text = Map.fetch!(data, "text")
 
@@ -125,7 +124,7 @@ defmodule OffBroadwayTwitter.Producer do
   end
 
   # We are are dispatching events as they arrive.
-  # If there is no Consumer or demand is low, then GenStage
+  # If there is no consumer or demand is low, then GenStage
   # will buffer the messages internally.
   #
   # For this scenario it's not necessary to have
