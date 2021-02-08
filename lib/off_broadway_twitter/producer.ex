@@ -88,24 +88,7 @@ defmodule OffBroadwayTwitter.Producer do
       Enum.flat_map(responses, fn response ->
         case response do
           {:data, ^ref, tweet} ->
-            case Jason.decode(tweet) do
-              {:ok, %{"data" => data}} ->
-                meta = Map.delete(data, "text")
-                text = Map.fetch!(data, "text")
-
-                [
-                  %Message{
-                    data: text,
-                    metadata: meta,
-                    acknowledger: {Broadway.NoopAcknowledger, nil, nil}
-                  }
-                ]
-
-              {:error, _} ->
-                IO.puts("error decoding")
-
-                []
-            end
+            decode_tweet(tweet)
 
           {:done, ^ref} ->
             []
@@ -116,6 +99,27 @@ defmodule OffBroadwayTwitter.Producer do
       end)
 
     {:noreply, Enum.reverse(tweets), state}
+  end
+
+  defp decode_tweet(tweet) do
+    case Jason.decode(tweet) do
+      {:ok, %{"data" => data}} ->
+        meta = Map.delete(data, "text")
+        text = Map.fetch!(data, "text")
+
+        [
+          %Message{
+            data: text,
+            metadata: meta,
+            acknowledger: {Broadway.NoopAcknowledger, nil, nil}
+          }
+        ]
+
+      {:error, _} ->
+        IO.puts("error decoding")
+
+        []
+    end
   end
 
   # We are are dispatching events as they arrive.

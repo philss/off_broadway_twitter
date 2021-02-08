@@ -21,14 +21,14 @@ defmodule OffBroadwayTwitter do
   end
 
   @impl true
-  def handle_message(_, %Message{data: data} = message, _) do
+  def handle_message(_, %Message{} = message, _) do
     message
     |> Message.update_data(fn data -> String.upcase(data) end)
   end
 
   @impl true
   def handle_batch(_, messages, _, _) do
-    list = messages |> Enum.map(fn e -> e.data end)
+    list = Enum.map(messages, fn message -> message.data end)
     IO.inspect(list, label: "Got batch")
 
     messages
