@@ -17,7 +17,6 @@ defmodule OffBroadwayTwitter.Producer do
 
     state =
       connect_to_stream(%{
-        tweets: [],
         request_ref: nil,
         last_message: nil,
         conn: nil,
@@ -83,44 +82,40 @@ defmodule OffBroadwayTwitter.Producer do
   end
 
   defp process_responses(responses, state) do
-    responses
-    |> Enum.reduce(state, fn response, state ->
-      ref = state.request_ref
+    ref = state.request_ref
 
-      case response do
-        {:data, ^ref, tweet} ->
-          case Jason.decode(tweet) do
-            {:ok, %{"data" => data}} ->
-              meta = Map.delete(data, "text")
-              text = Map.fetch!(data, "text")
+    tweets =
+      Enum.flat_map(responses, fn response ->
+        case response do
+          {:data, ^ref, tweet} ->
+            case Jason.decode(tweet) do
+              {:ok, %{"data" => data}} ->
+                meta = Map.delete(data, "text")
+                text = Map.fetch!(data, "text")
 
-              message = %Message{
-                data: text,
-                metadata: meta,
-                acknowledger: {Broadway.NoopAcknowledger, nil, nil}
-              }
+                [
+                  %Message{
+                    data: text,
+                    metadata: meta,
+                    acknowledger: {Broadway.NoopAcknowledger, nil, nil}
+                  }
+                ]
 
-              %{state | tweets: [message | state.tweets]}
+              {:error, _} ->
+                IO.puts("error decoding")
 
-            {:error, _} ->
-              IO.puts("error decoding")
+                []
+            end
 
-              state
-          end
+          {:done, ^ref} ->
+            []
 
-        {:done, ^ref} ->
-          state
+          {_, _ref, _other} ->
+            []
+        end
+      end)
 
-        {_, _ref, _other} ->
-          state
-      end
-    end)
-    |> handle_received_messages()
-  end
-
-  @impl true
-  def handle_demand(_demand, state) do
-    handle_received_messages(state)
+    {:noreply, Enum.reverse(tweets), state}
   end
 
   # We are are dispatching events as they arrive.
@@ -131,7 +126,8 @@ defmodule OffBroadwayTwitter.Producer do
   # an internal control, since Twitter is a firehouse
   # of events without back-pressure. We only ignore
   # the Tweets that doesn't fit the buffer.
-  defp handle_received_messages(state) do
-    {:noreply, Enum.reverse(state.tweets), %{state | tweets: []}}
+  @impl true
+  def handle_demand(_demand, state) do
+    {:noreply, [], state}
   end
 end
