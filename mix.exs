@@ -22,8 +22,8 @@ defmodule OffBroadwayTwitter.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:broadway, "~> 0.6.2"},
-      {:castore, "~> 0.1.0"},
+      {:broadway, "~> 1.0"},
+      {:castore, "~> 0.1"},
       {:mint, "~> 1.0"},
       {:jason, "~> 1.2"}
     ]
